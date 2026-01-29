@@ -1,0 +1,22 @@
+services:
+  cal_view:
+    image: ghcr.io/nckslvrmn/cal_view:${CAL_VIEW_VERSION:-latest}
+    container_name: cal_view
+    restart: always
+    environment:
+    - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+    - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+    - REDIRECT_URL=https://cal-view.slvr.io/auth/callback
+    volumes:
+    - /app/cal_view:/data
+    labels:
+    - "traefik.enable=true"
+    - "traefik.http.routers.cal_view.rule=Host(`cal-view.slvr.io`)"
+    - "traefik.http.routers.cal_view.entrypoints=internal"
+    - "traefik.http.services.cal_view.loadbalancer.server.port=3000"
+    networks:
+    - traefik
+
+networks:
+  traefik:
+    external: true

@@ -1,0 +1,24 @@
+name: Deploy To Home
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Image version tag (e.g. v1.0.0)'
+        required: false
+        default: 'latest'
+
+jobs:
+  deploy:
+    runs-on: [self-hosted]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: nckslvrmn/docker-compose-deploy@main
+        with:
+          file: compose.yml
+        env:
+          CAL_VIEW_VERSION: ${{ inputs.version }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
