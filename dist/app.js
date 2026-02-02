@@ -2,6 +2,8 @@ let calendar;
 let selectedCalendars = new Set();
 let allCalendars = [];
 let autoRefreshInterval = null;
+let tokenRefreshFailures = 0;
+const MAX_REFRESH_FAILURES = 2;
 
 window.addEventListener('load', () => {
     initializeApp();
@@ -18,9 +20,15 @@ async function initializeApp() {
     ]);
 
     if (api.checkStoredAuth()) {
+        tokenRefreshFailures = 0; // Reset counter on successful auth check
+
         if (api.isTokenExpiringSoon()) {
             console.log('Token expiring soon on startup, refreshing...');
-            await api.refreshTokenSilently();
+            const refreshSuccess = await api.refreshTokenSilently();
+            if (!refreshSuccess) {
+                console.warn('Startup token refresh failed, continuing anyway');
+                tokenRefreshFailures = 1;
+            }
         }
 
         showCalendarView();
@@ -284,14 +292,30 @@ async function loadEvents(showLoading = true) {
 
         if (error.status === 401 || error.status === 403) {
             console.log('Auth error detected, attempting to refresh token...');
+
+            if (tokenRefreshFailures >= MAX_REFRESH_FAILURES) {
+                console.error('Max refresh failures reached, stopping attempts');
+                stopAutoRefresh();
+                showAuthRequiredMessage();
+                return;
+            }
+
             const refreshSuccess = await api.refreshTokenSilently();
 
             if (refreshSuccess) {
                 console.log('Token refreshed, retrying...');
+                tokenRefreshFailures = 0; // Reset counter on success
                 await loadEvents(false);
             } else {
-                console.error('Token refresh failed');
-                showError('Authentication expired. Please refresh the page.');
+                tokenRefreshFailures++;
+                console.error(`Token refresh failed (attempt ${tokenRefreshFailures}/${MAX_REFRESH_FAILURES})`);
+
+                if (tokenRefreshFailures >= MAX_REFRESH_FAILURES) {
+                    stopAutoRefresh();
+                    showAuthRequiredMessage();
+                } else {
+                    showError('Authentication expired. Please refresh the page.');
+                }
             }
         } else {
             showError('Failed to load events');
@@ -316,6 +340,24 @@ function showError(message) {
     console.error(message);
 }
 
+function showAuthRequiredMessage() {
+    console.error('Session expired - please refresh the page to re-authenticate');
+
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    if (loadingOverlay) {
+        loadingOverlay.innerHTML = `
+            <div style="color: white; text-align: center; padding: 20px;">
+                <h2>Session Expired</h2>
+                <p>Please refresh the page to continue</p>
+                <button onclick="location.reload()" style="margin-top: 20px; padding: 10px 20px; font-size: 16px; cursor: pointer;">
+                    Refresh Page
+                </button>
+            </div>
+        `;
+        loadingOverlay.classList.remove('hidden');
+    }
+}
+
 function shouldAdvanceToCurrentMonth() {
     const today = new Date();
     const currentMonth = calendar.currentDate.getMonth();
@@ -336,10 +378,26 @@ function startAutoRefresh() {
         try {
             if (api.isTokenExpiringSoon()) {
                 console.log('Token expiring soon, refreshing...');
+
+                if (tokenRefreshFailures >= MAX_REFRESH_FAILURES) {
+                    console.error('Max refresh failures reached, stopping auto-refresh');
+                    stopAutoRefresh();
+                    showAuthRequiredMessage();
+                    return;
+                }
+
                 const refreshSuccess = await api.refreshTokenSilently();
                 if (!refreshSuccess) {
-                    console.error('Token refresh failed, skipping auto-refresh');
+                    tokenRefreshFailures++;
+                    console.error(`Token refresh failed in auto-refresh (attempt ${tokenRefreshFailures}/${MAX_REFRESH_FAILURES})`);
+
+                    if (tokenRefreshFailures >= MAX_REFRESH_FAILURES) {
+                        stopAutoRefresh();
+                        showAuthRequiredMessage();
+                    }
                     return;
+                } else {
+                    tokenRefreshFailures = 0; // Reset on success
                 }
             }
 
@@ -353,12 +411,26 @@ function startAutoRefresh() {
         } catch (error) {
             console.error('Auto-refresh failed:', error);
             if (error.status === 401 || error.status === 403) {
-                console.log('Auth error detected, attempting to refresh token...');
+                console.log('Auth error detected in auto-refresh');
+
+                if (tokenRefreshFailures >= MAX_REFRESH_FAILURES) {
+                    console.error('Max refresh failures reached, stopping auto-refresh');
+                    stopAutoRefresh();
+                    showAuthRequiredMessage();
+                    return;
+                }
+
                 const refreshSuccess = await api.refreshTokenSilently();
                 if (!refreshSuccess) {
-                    console.error('Token refresh failed, stopping auto-refresh');
-                    stopAutoRefresh();
-                    showError('Authentication expired. Please refresh the page.');
+                    tokenRefreshFailures++;
+                    console.error(`Token refresh failed (attempt ${tokenRefreshFailures}/${MAX_REFRESH_FAILURES})`);
+
+                    if (tokenRefreshFailures >= MAX_REFRESH_FAILURES) {
+                        stopAutoRefresh();
+                        showAuthRequiredMessage();
+                    }
+                } else {
+                    tokenRefreshFailures = 0; // Reset on success
                 }
             }
         }
@@ -384,7 +456,26 @@ function setupVisibilityListener() {
 
             if (api.isTokenExpiringSoon()) {
                 console.log('Token expiring soon, refreshing...');
-                await api.refreshTokenSilently();
+
+                if (tokenRefreshFailures >= MAX_REFRESH_FAILURES) {
+                    console.error('Max refresh failures reached');
+                    showAuthRequiredMessage();
+                    return;
+                }
+
+                const refreshSuccess = await api.refreshTokenSilently();
+                if (!refreshSuccess) {
+                    tokenRefreshFailures++;
+                    console.error(`Token refresh failed on visibility change (attempt ${tokenRefreshFailures}/${MAX_REFRESH_FAILURES})`);
+
+                    if (tokenRefreshFailures >= MAX_REFRESH_FAILURES) {
+                        stopAutoRefresh();
+                        showAuthRequiredMessage();
+                        return;
+                    }
+                } else {
+                    tokenRefreshFailures = 0; // Reset on success
+                }
             }
 
             if (shouldAdvanceToCurrentMonth()) {

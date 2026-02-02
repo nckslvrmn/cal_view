@@ -26,15 +26,10 @@ class GoogleCalendarAPI {
     async initGapi() {
         return new Promise((resolve) => {
             gapi.load('client', async () => {
-                const initConfig = {
+                // API key is not needed for OAuth flows
+                await gapi.client.init({
                     discoveryDocs: CONFIG.DISCOVERY_DOCS
-                };
-
-                if (CONFIG.API_KEY && CONFIG.API_KEY !== 'YOUR_API_KEY_HERE') {
-                    initConfig.apiKey = CONFIG.API_KEY;
-                }
-
-                await gapi.client.init(initConfig);
+                });
                 this.gapiInited = true;
                 resolve();
             });
@@ -49,12 +44,22 @@ class GoogleCalendarAPI {
                 callback: (response) => {
                     if (response.error) {
                         console.error('Token response error:', response);
+                        console.error('Error details:', {
+                            error: response.error,
+                            error_description: response.error_description,
+                            error_uri: response.error_uri
+                        });
+
+                        // Call callback with error flag so promise can reject
+                        if (this.onAuthCallback) {
+                            this.onAuthCallback(response.error);
+                        }
                         return;
                     }
                     this.isSignedIn = true;
                     this.saveAuthToStorage();
                     if (this.onAuthCallback) {
-                        this.onAuthCallback();
+                        this.onAuthCallback(null);
                     }
                 }
             });
@@ -108,21 +113,34 @@ class GoogleCalendarAPI {
             return false;
         }
 
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve) => {
             const originalCallback = this.onAuthCallback;
             let timeoutId;
 
-            const refreshCallback = () => {
+            const refreshCallback = (error) => {
                 clearTimeout(timeoutId);
                 this.onAuthCallback = originalCallback;
-                resolve(true);
+
+                if (error) {
+                    console.error('Token refresh failed:', error);
+                    // Common error for unverified apps: 'popup_closed_by_user' or 'access_denied'
+                    if (error === 'access_denied' || error === 'popup_closed_by_user') {
+                        console.warn('Silent refresh not supported for unverified apps - user must re-authenticate');
+                    }
+                    resolve(false);
+                } else {
+                    console.log('Token refreshed successfully');
+                    resolve(true);
+                }
             };
 
+            // Increased timeout to 15 seconds for slower connections
             timeoutId = setTimeout(() => {
                 this.onAuthCallback = originalCallback;
-                console.error('Token refresh timeout');
+                console.error('Token refresh timeout - no response after 15 seconds');
+                console.warn('This may indicate an unverified app that cannot perform silent refresh');
                 resolve(false);
-            }, 10000);
+            }, 15000);
 
             this.onAuthCallback = refreshCallback;
             this.tokenClient.requestAccessToken({ prompt: '' });
@@ -131,13 +149,23 @@ class GoogleCalendarAPI {
 
     isTokenExpiringSoon() {
         const expiry = localStorage.getItem('gapi_token_expiry');
-        if (!expiry) return true;
+        if (!expiry) {
+            console.warn('No token expiry found in localStorage');
+            return true;
+        }
 
         const expiryDate = new Date(expiry);
         const now = new Date();
-        const fiveMinutesFromNow = new Date(now.getTime() + 5 * 60 * 1000);
+        // Reduced from 5 minutes to 2 minutes for less aggressive refreshing
+        const twoMinutesFromNow = new Date(now.getTime() + 2 * 60 * 1000);
+        const timeUntilExpiry = Math.floor((expiryDate.getTime() - now.getTime()) / 60000);
 
-        return expiryDate <= fiveMinutesFromNow;
+        const isExpiring = expiryDate <= twoMinutesFromNow;
+        if (isExpiring) {
+            console.log(`Token expiring in ${timeUntilExpiry} minutes`);
+        }
+
+        return isExpiring;
     }
 
     signOut() {
@@ -257,6 +285,13 @@ class GoogleCalendarAPI {
     }
 
     saveToCache(key, data) {
+        // Implement LRU-style cache limiting
+        if (this.cache.size >= CONFIG.MAX_CACHE_ENTRIES) {
+            // Remove oldest entry
+            const oldestKey = this.cache.keys().next().value;
+            this.cache.delete(oldestKey);
+        }
+
         this.cache.set(key, {
             data: data,
             timestamp: Date.now()
