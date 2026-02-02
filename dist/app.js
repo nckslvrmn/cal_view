@@ -284,13 +284,13 @@ async function loadEvents(showLoading = true) {
 
         if (error.status === 401 || error.status === 403) {
             console.log('Auth error detected, attempting to refresh token...');
-            try {
-                await api.refreshTokenSilently();
+            const refreshSuccess = await api.refreshTokenSilently();
+
+            if (refreshSuccess) {
                 console.log('Token refreshed, retrying...');
-                await loadEvents();
-                return;
-            } catch (retryError) {
-                console.error('Token refresh failed:', retryError);
+                await loadEvents(false);
+            } else {
+                console.error('Token refresh failed');
                 showError('Authentication expired. Please refresh the page.');
             }
         } else {
@@ -336,7 +336,11 @@ function startAutoRefresh() {
         try {
             if (api.isTokenExpiringSoon()) {
                 console.log('Token expiring soon, refreshing...');
-                await api.refreshTokenSilently();
+                const refreshSuccess = await api.refreshTokenSilently();
+                if (!refreshSuccess) {
+                    console.error('Token refresh failed, skipping auto-refresh');
+                    return;
+                }
             }
 
             if (shouldAdvanceToCurrentMonth()) {
@@ -350,7 +354,12 @@ function startAutoRefresh() {
             console.error('Auto-refresh failed:', error);
             if (error.status === 401 || error.status === 403) {
                 console.log('Auth error detected, attempting to refresh token...');
-                await api.refreshTokenSilently();
+                const refreshSuccess = await api.refreshTokenSilently();
+                if (!refreshSuccess) {
+                    console.error('Token refresh failed, stopping auto-refresh');
+                    stopAutoRefresh();
+                    showError('Authentication expired. Please refresh the page.');
+                }
             }
         }
     }, CONFIG.AUTO_REFRESH_INTERVAL);
@@ -367,7 +376,7 @@ function stopAutoRefresh() {
 }
 
 function setupVisibilityListener() {
-    document.addEventListener('visibilitychange', () => {
+    document.addEventListener('visibilitychange', async () => {
         if (document.hidden) {
             console.log('Page hidden - continuing auto-refresh in background');
         } else {
@@ -375,7 +384,7 @@ function setupVisibilityListener() {
 
             if (api.isTokenExpiringSoon()) {
                 console.log('Token expiring soon, refreshing...');
-                api.refreshTokenSilently();
+                await api.refreshTokenSilently();
             }
 
             if (shouldAdvanceToCurrentMonth()) {
@@ -384,7 +393,7 @@ function setupVisibilityListener() {
             }
 
             api.clearCache();
-            loadEvents(false);
+            await loadEvents(false);
         }
     });
 }

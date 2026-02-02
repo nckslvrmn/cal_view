@@ -108,9 +108,24 @@ class GoogleCalendarAPI {
             return false;
         }
 
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
+            const originalCallback = this.onAuthCallback;
+            let timeoutId;
+
+            const refreshCallback = () => {
+                clearTimeout(timeoutId);
+                this.onAuthCallback = originalCallback;
+                resolve(true);
+            };
+
+            timeoutId = setTimeout(() => {
+                this.onAuthCallback = originalCallback;
+                console.error('Token refresh timeout');
+                resolve(false);
+            }, 10000);
+
+            this.onAuthCallback = refreshCallback;
             this.tokenClient.requestAccessToken({ prompt: '' });
-            setTimeout(() => resolve(this.isSignedIn), 1000);
         });
     }
 
