@@ -65,4 +65,4 @@ Open `https://cal.example.com/auth/login` and approve access. The refresh token 
 ## Notes
 
 - `/api/token` hands out a read-only calendar access token, and `/auth/login` replaces the stored account, for anyone who can reach the server. Keep it on a private network.
-- Sign out on the display revokes the refresh token on the server, so every display gets signed out.
+- The display has no sign out button. `POST /auth/logout` revokes the refresh token on the server, which signs out every display.

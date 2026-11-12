@@ -1,46 +1,62 @@
-const MAX_EVENTS_PER_DAY = 4;
-
 class CalendarRenderer {
     constructor() {
-        this.currentDate = new Date();
+        this.startDate = this.weekStart(new Date());
         this.events = [];
+        this.agendaEvents = [];
+        this.cellDates = [];
         this.calendars = new Map();
         this.calendarBody = document.getElementById('calendarBody');
-        this.tooltip = document.getElementById('eventTooltip');
-        this.isTooltipVisible = false;
-        this.tooltipAutoHideTimeout = null;
-        this.ignoreNextDocumentClick = false;
+        this.agendaList = document.getElementById('agendaList');
+        this.daySheet = document.getElementById('daySheet');
+        this.daySheetTitle = document.getElementById('daySheetTitle');
+        this.daySheetList = document.getElementById('daySheetList');
 
-        // Hide tooltip when clicking outside
-        document.addEventListener('click', (e) => {
-            if (this.ignoreNextDocumentClick) {
-                this.ignoreNextDocumentClick = false;
-                return;
-            }
-            if (this.isTooltipVisible && !e.target.closest('.event') && !e.target.closest('.event-tooltip')) {
-                this.hideTooltip();
-            }
-        });
+        this.calendarBody.addEventListener('click', (e) => this.handleGridClick(e));
+
+        let resizeFrame = null;
+        new ResizeObserver(() => {
+            cancelAnimationFrame(resizeFrame);
+            resizeFrame = requestAnimationFrame(() => this.render());
+        }).observe(this.calendarBody);
     }
 
-    setDate(date) {
-        this.currentDate = new Date(date);
+    weekStart(date) {
+        const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        start.setDate(start.getDate() - start.getDay());
+        return start;
     }
 
-    getFirstDayOfMonth() {
-        return new Date(this.currentDate.getFullYear(), this.currentDate.getMonth(), 1);
+    getRangeStart() {
+        return new Date(this.startDate);
     }
 
-    getLastDayOfMonth() {
-        return new Date(this.currentDate.getFullYear(), this.currentDate.getMonth() + 1, 0);
+    getRangeEnd() {
+        const end = new Date(this.startDate);
+        end.setDate(end.getDate() + CONFIG.WEEKS_SHOWN * 7);
+        return end;
     }
 
-    getMonthName() {
-        return this.currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    getTitle() {
+        const start = this.startDate;
+        const last = this.getRangeEnd();
+        last.setDate(last.getDate() - 1);
+
+        if (start.getMonth() === last.getMonth()) {
+            return start.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        }
+
+        const sameYear = start.getFullYear() === last.getFullYear();
+        const startLabel = start.toLocaleDateString('en-US', sameYear ? { month: 'short' } : { month: 'short', year: 'numeric' });
+        const lastLabel = last.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+        return `${startLabel} – ${lastLabel}`;
     }
 
     setEvents(events) {
         this.events = events;
+    }
+
+    setAgendaEvents(events) {
+        this.agendaEvents = events;
     }
 
     setCalendars(calendars) {
@@ -53,52 +69,32 @@ class CalendarRenderer {
     render() {
         this.calendarBody.innerHTML = '';
 
-        const firstDay = this.getFirstDayOfMonth();
-        const lastDay = this.getLastDayOfMonth();
-
-        const startDayOfWeek = firstDay.getDay();
-
-        const prevMonthLastDay = new Date(this.currentDate.getFullYear(), this.currentDate.getMonth(), 0);
-        const prevMonthDays = prevMonthLastDay.getDate();
-
-        const totalDays = lastDay.getDate();
-        const totalCells = Math.ceil((startDayOfWeek + totalDays) / 7) * 7;
-
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        const todayStr = new Date().toLocaleDateString('en-CA');
 
         // Store cell dates for multi-day event calculation
         const cellDates = [];
         const cellElements = [];
 
-        for (let i = 0; i < totalCells; i++) {
+        for (let i = 0; i < CONFIG.WEEKS_SHOWN * 7; i++) {
             const cell = document.createElement('div');
             cell.className = 'calendar-day';
+            cell.dataset.index = i;
 
-            let dayNumber, currentCellDate;
+            const currentCellDate = new Date(this.startDate);
+            currentCellDate.setDate(currentCellDate.getDate() + i);
 
-            if (i < startDayOfWeek) {
-                dayNumber = prevMonthDays - startDayOfWeek + i + 1;
-                currentCellDate = new Date(this.currentDate.getFullYear(), this.currentDate.getMonth() - 1, dayNumber);
-                cell.classList.add('other-month');
-            } else if (i >= startDayOfWeek + totalDays) {
-                dayNumber = i - startDayOfWeek - totalDays + 1;
-                currentCellDate = new Date(this.currentDate.getFullYear(), this.currentDate.getMonth() + 1, dayNumber);
-                cell.classList.add('other-month');
-            } else {
-                dayNumber = i - startDayOfWeek + 1;
-                currentCellDate = new Date(this.currentDate.getFullYear(), this.currentDate.getMonth(), dayNumber);
-
-                const cellDate = new Date(currentCellDate);
-                cellDate.setHours(0, 0, 0, 0);
-                if (cellDate.getTime() === today.getTime()) {
-                    cell.classList.add('today');
-                }
+            const cellDateStr = currentCellDate.toLocaleDateString('en-CA');
+            if (cellDateStr === todayStr) {
+                cell.classList.add('today');
+            } else if (cellDateStr < todayStr) {
+                cell.classList.add('past');
             }
 
             const dayNumberEl = document.createElement('div');
             dayNumberEl.className = 'day-number';
-            dayNumberEl.textContent = dayNumber;
+            dayNumberEl.textContent = i === 0 || currentCellDate.getDate() === 1
+                ? currentCellDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                : currentCellDate.getDate();
             cell.appendChild(dayNumberEl);
 
             const eventsContainer = document.createElement('div');
@@ -110,8 +106,53 @@ class CalendarRenderer {
             this.calendarBody.appendChild(cell);
         }
 
+        this.cellDates = cellDates;
+
         // Render events with multi-day spanning
         this.renderAllEvents(cellDates, cellElements);
+        cellElements.forEach(cell => this.fitDayEvents(cell.querySelector('.day-events')));
+    }
+
+    fitDayEvents(container) {
+        const events = Array.from(container.querySelectorAll(':scope > .event:not(.event-multi-day)'));
+        const limit = container.clientHeight;
+        const overflows = el => el.offsetTop + el.offsetHeight > limit;
+
+        let visible = events.findIndex(overflows);
+        if (visible === -1) {
+            return;
+        }
+
+        const moreEl = document.createElement('div');
+        moreEl.className = 'more-events';
+        container.appendChild(moreEl);
+
+        for (;;) {
+            events.slice(visible).forEach(el => { el.style.display = 'none'; });
+            moreEl.textContent = `+${events.length - visible} more`;
+            if (visible === 0 || !overflows(moreEl)) {
+                break;
+            }
+            visible--;
+        }
+    }
+
+    handleGridClick(e) {
+        const cell = e.target.closest('.calendar-day');
+        if (!cell) {
+            return;
+        }
+
+        let index = Number(cell.dataset.index);
+
+        // Multi-day bars live in their first cell but draw across later ones, so find the tapped day by x.
+        const bar = e.target.closest('.event-multi-day');
+        if (bar) {
+            const offset = Math.floor((e.clientX - bar.getBoundingClientRect().left) / cell.getBoundingClientRect().width);
+            index += Math.max(0, Math.min(offset, Number(bar.dataset.spanDays) - 1));
+        }
+
+        this.openDaySheet(this.cellDates[index], this.events);
     }
 
     renderAllEvents(cellDates, cellElements) {
@@ -245,7 +286,7 @@ class CalendarRenderer {
             }
 
             // Render regular events
-            this.renderDayEvents(eventsContainer, regularEvents, false);
+            this.renderDayEvents(eventsContainer, regularEvents);
         });
     }
 
@@ -333,6 +374,10 @@ class CalendarRenderer {
         // Position vertically based on how many other multi-day events are above this one
         eventEl.style.top = `${position * 28}px`; // Stack vertically with 28px spacing
 
+        if (this.isEnded(event, new Date())) {
+            eventEl.classList.add('ended');
+        }
+
         if (event.backgroundColor) {
             eventEl.style.backgroundColor = event.backgroundColor;
             eventEl.style.color = this.getContrastColor(event.backgroundColor);
@@ -342,19 +387,24 @@ class CalendarRenderer {
         titleSpan.textContent = event.title || '(No title)';
         eventEl.appendChild(titleSpan);
 
-        this.addTooltipEventListeners(eventEl, event);
-
         container.appendChild(eventEl);
     }
 
-    getEventsForDay(date) {
+    isEnded(event, now) {
+        if (event.allDay) {
+            return event.endStr <= now.toLocaleDateString('en-CA');
+        }
+        return event.end <= now;
+    }
+
+    getEventsForDay(date, events = this.events) {
         const dayStart = new Date(date);
         dayStart.setHours(0, 0, 0, 0);
 
         const dayEnd = new Date(date);
         dayEnd.setHours(23, 59, 59, 999);
 
-        return this.events.filter(event => {
+        return events.filter(event => {
             if (event.allDay) {
                 const dayDate = date.toLocaleDateString('en-CA');
 
@@ -375,16 +425,19 @@ class CalendarRenderer {
         });
     }
 
-    renderDayEvents(container, events, showMoreCount = true) {
-        const visibleEvents = events.slice(0, MAX_EVENTS_PER_DAY);
-        const hiddenCount = events.length - visibleEvents.length;
+    renderDayEvents(container, events) {
+        const now = new Date();
 
-        visibleEvents.forEach(event => {
+        events.forEach(event => {
             const eventEl = document.createElement('div');
             eventEl.className = 'event';
 
             if (event.allDay) {
                 eventEl.classList.add('all-day');
+            }
+
+            if (this.isEnded(event, now)) {
+                eventEl.classList.add('ended');
             }
 
             if (event.backgroundColor) {
@@ -405,17 +458,8 @@ class CalendarRenderer {
             titleSpan.textContent = event.title || '(No title)';
             eventEl.appendChild(titleSpan);
 
-            this.addTooltipEventListeners(eventEl, event);
-
             container.appendChild(eventEl);
         });
-
-        if (showMoreCount && hiddenCount > 0) {
-            const moreEl = document.createElement('div');
-            moreEl.className = 'more-events';
-            moreEl.textContent = `+${hiddenCount} more`;
-            container.appendChild(moreEl);
-        }
     }
 
     formatTime(date) {
@@ -436,116 +480,161 @@ class CalendarRenderer {
         return luminance > 0.5 ? '#1a1a2e' : '#ffffff';
     }
 
-    addTooltipEventListeners(eventEl, eventData) {
-        let tooltipTimeout = null;
+    formatDateRange(event) {
+        // For all-day events, parse date strings carefully to avoid timezone issues
+        // Date strings from Google Calendar are in YYYY-MM-DD format and should be treated as local dates
+        const [startYear, startMonth, startDay] = event.startStr.split('-').map(Number);
+        const [endYear, endMonth, endDay] = event.endStr.split('-').map(Number);
 
-        // For touch devices (iPad)
-        eventEl.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
+        const startDate = new Date(startYear, startMonth - 1, startDay);
+        const endDate = new Date(endYear, endMonth - 1, endDay);
 
-            if (this.isTooltipVisible && this.currentTooltipData === eventData) {
-                this.hideTooltip();
-            } else {
-                this.showTooltip(e, eventData);
-                // Prevent the document click handler from firing immediately after this
-                this.ignoreNextDocumentClick = true;
-            }
+        const startFormatted = startDate.toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: startDate.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined
         });
-
-        // For desktop (mouse)
-        eventEl.addEventListener('mouseenter', (e) => {
-            if (tooltipTimeout) clearTimeout(tooltipTimeout);
-            this.showTooltip(e, eventData);
+        // Google Calendar end dates are exclusive, so subtract 1 day for display
+        const displayEndDate = new Date(endDate);
+        displayEndDate.setDate(displayEndDate.getDate() - 1);
+        const endFormatted = displayEndDate.toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: displayEndDate.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined
         });
-
-        eventEl.addEventListener('mouseleave', () => {
-            tooltipTimeout = setTimeout(() => {
-                this.hideTooltip();
-            }, 100);
-        });
+        return `${startFormatted} – ${endFormatted}`;
     }
 
-    showTooltip(event, eventData) {
-        let timeStr;
-        if (eventData.allDay) {
-            // Check if it's a multi-day event
-            if (this.isMultiDayEvent(eventData)) {
-                // For all-day events, parse date strings carefully to avoid timezone issues
-                // Date strings from Google Calendar are in YYYY-MM-DD format and should be treated as local dates
-                const [startYear, startMonth, startDay] = eventData.startStr.split('-').map(Number);
-                const [endYear, endMonth, endDay] = eventData.endStr.split('-').map(Number);
+    // Descriptions are HTML written by whoever sent the invite, so keep only the text.
+    descriptionText(html) {
+        const withBreaks = html.replace(/<br\s*\/?>|<\/(p|div|li)>/gi, '\n');
+        return new DOMParser().parseFromString(withBreaks, 'text/html').body.textContent.trim();
+    }
 
-                const startDate = new Date(startYear, startMonth - 1, startDay);
-                const endDate = new Date(endYear, endMonth - 1, endDay);
+    buildEventRow(event, detailed) {
+        const now = new Date();
+        const row = document.createElement('div');
+        row.className = 'event-row';
+        row.style.setProperty('--event-color', event.backgroundColor);
 
-                // Format as date range
-                const startFormatted = startDate.toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: startDate.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined
-                });
-                // Google Calendar end dates are exclusive, so subtract 1 day for display
-                const displayEndDate = new Date(endDate);
-                displayEndDate.setDate(displayEndDate.getDate() - 1);
-                const endFormatted = displayEndDate.toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: displayEndDate.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined
-                });
-                timeStr = `${startFormatted} - ${endFormatted}`;
-            } else {
-                timeStr = 'All day';
-            }
+        if (this.isEnded(event, now)) {
+            row.classList.add('ended');
+        } else if (!event.allDay && event.start <= now) {
+            row.classList.add('ongoing');
+        }
+
+        const time = document.createElement('div');
+        time.className = 'event-row-time';
+        if (event.allDay) {
+            time.textContent = 'All day';
         } else {
-            const startDate = new Date(eventData.start);
-            const endDate = new Date(eventData.end);
-            timeStr = `${this.formatTime(startDate)} - ${this.formatTime(endDate)}`;
+            const start = document.createElement('span');
+            start.textContent = this.formatTime(event.start);
+            const end = document.createElement('span');
+            end.className = 'event-row-end';
+            end.textContent = this.formatTime(event.end);
+            time.append(start, end);
         }
 
-        this.tooltip.innerHTML = `
-            <div class="tooltip-title">${eventData.title || '(No title)'}</div>
-            <div class="tooltip-time">${timeStr}</div>
-            <div class="tooltip-calendar">${eventData.calendar ? eventData.calendar.summary : 'Unknown calendar'}</div>
-            ${eventData.description ? `<div class="tooltip-description">${eventData.description}</div>` : ''}
-        `;
+        const details = document.createElement('div');
+        details.className = 'event-row-details';
 
-        const rect = event.target.getBoundingClientRect();
-        this.tooltip.style.left = `${rect.left + window.scrollX}px`;
-        this.tooltip.style.top = `${rect.bottom + window.scrollY + 5}px`;
+        const title = document.createElement('div');
+        title.className = 'event-row-title';
+        title.textContent = event.title || '(No title)';
+        details.appendChild(title);
 
-        this.tooltip.classList.remove('hidden');
-        this.isTooltipVisible = true;
-        this.currentTooltipData = eventData;
-
-        // Auto-hide tooltip after 4 seconds
-        if (this.tooltipAutoHideTimeout) {
-            clearTimeout(this.tooltipAutoHideTimeout);
+        const meta = [
+            this.isMultiDayEvent(event) ? this.formatDateRange(event) : '',
+            event.location,
+            detailed && event.calendar ? event.calendar.summary : ''
+        ].filter(Boolean);
+        if (meta.length > 0) {
+            const metaEl = document.createElement('div');
+            metaEl.className = 'event-row-meta';
+            metaEl.textContent = meta.join(' · ');
+            details.appendChild(metaEl);
         }
-        this.tooltipAutoHideTimeout = setTimeout(() => {
-            this.hideTooltip();
-        }, 4000);
+
+        if (detailed && event.description) {
+            const description = document.createElement('div');
+            description.className = 'event-row-description';
+            description.textContent = this.descriptionText(event.description);
+            details.appendChild(description);
+        }
+
+        row.append(time, details);
+        return row;
     }
 
-    hideTooltip() {
-        this.tooltip.classList.add('hidden');
-        this.isTooltipVisible = false;
-        this.currentTooltipData = null;
-        if (this.tooltipAutoHideTimeout) {
-            clearTimeout(this.tooltipAutoHideTimeout);
-            this.tooltipAutoHideTimeout = null;
+    emptyMessage(text) {
+        const el = document.createElement('p');
+        el.className = 'empty-message';
+        el.textContent = text;
+        return el;
+    }
+
+    renderAgenda() {
+        this.agendaList.innerHTML = '';
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        for (let i = 0; i < CONFIG.AGENDA_DAYS; i++) {
+            const day = new Date(today);
+            day.setDate(day.getDate() + i);
+
+            const events = this.getEventsForDay(day, this.agendaEvents);
+            if (events.length === 0 && i > 0) {
+                continue;
+            }
+
+            const heading = document.createElement('h4');
+            heading.className = 'agenda-day';
+            heading.textContent = i === 0 ? 'Today'
+                : i === 1 ? 'Tomorrow'
+                : day.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+            this.agendaList.appendChild(heading);
+
+            if (events.length === 0) {
+                this.agendaList.appendChild(this.emptyMessage('Nothing today'));
+            }
+
+            events.forEach(event => {
+                const row = this.buildEventRow(event, false);
+                row.addEventListener('click', () => this.openDaySheet(day, this.agendaEvents));
+                this.agendaList.appendChild(row);
+            });
         }
     }
 
-    previousMonth() {
-        this.currentDate.setMonth(this.currentDate.getMonth() - 1);
+    openDaySheet(date, events) {
+        this.daySheetTitle.textContent = date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+        this.daySheetList.innerHTML = '';
+
+        const dayEvents = this.getEventsForDay(date, events);
+        if (dayEvents.length === 0) {
+            this.daySheetList.appendChild(this.emptyMessage('No events'));
+        }
+        dayEvents.forEach(event => this.daySheetList.appendChild(this.buildEventRow(event, true)));
+
+        this.daySheetList.scrollTop = 0;
+        this.daySheet.classList.remove('hidden');
     }
 
-    nextMonth() {
-        this.currentDate.setMonth(this.currentDate.getMonth() + 1);
+    closeDaySheet() {
+        this.daySheet.classList.add('hidden');
+    }
+
+    previous() {
+        this.startDate.setDate(this.startDate.getDate() - CONFIG.WEEKS_SHOWN * 7);
+    }
+
+    next() {
+        this.startDate.setDate(this.startDate.getDate() + CONFIG.WEEKS_SHOWN * 7);
     }
 
     goToToday() {
-        this.currentDate = new Date();
+        this.startDate = this.weekStart(new Date());
     }
 }

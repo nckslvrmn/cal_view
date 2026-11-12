@@ -60,13 +60,6 @@ class GoogleCalendarAPI {
         window.location.href = 'auth/login';
     }
 
-    async signOut() {
-        await fetch('auth/logout', { method: 'POST' });
-        gapi.client.setToken(null);
-        this.tokenExpiry = 0;
-        this.cache.clear();
-    }
-
     async requireToken() {
         if (!await this.ensureToken()) {
             throw { status: 401, message: 'Not authorized' };
@@ -118,15 +111,19 @@ class GoogleCalendarAPI {
             await this.requireToken();
             const allEvents = [];
 
-            for (const calendarId of calendarIds) {
-                const response = await gapi.client.calendar.events.list({
+            const responses = await Promise.all(calendarIds.map(calendarId =>
+                gapi.client.calendar.events.list({
                     calendarId: calendarId,
                     timeMin: new Date(startDate).toISOString(),
                     timeMax: new Date(endDate).toISOString(),
                     singleEvents: true,
                     orderBy: 'startTime',
                     maxResults: 2500
-                });
+                })
+            ));
+
+            responses.forEach((response, i) => {
+                const calendarId = calendarIds[i];
 
                 if (response.result.items) {
                     response.result.items.forEach(event => {
@@ -161,12 +158,13 @@ class GoogleCalendarAPI {
                             endStr: isAllDay ? event.end.date : endDateTime,
                             allDay: isAllDay,
                             description: event.description || '',
+                            location: event.location || '',
                             calendar: calendar,
                             backgroundColor: eventColor
                         });
                     });
                 }
-            }
+            });
 
             this.saveToCache(cacheKey, allEvents);
             return allEvents;

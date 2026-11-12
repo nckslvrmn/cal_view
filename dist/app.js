@@ -1,7 +1,11 @@
+// Store hidden rather than selected calendars so newly added calendars show up by default.
+const HIDDEN_CALENDARS_KEY = 'hiddenCalendars';
+
 let calendar;
-let selectedCalendars = new Set();
+let hiddenCalendars = loadHiddenCalendars();
 let allCalendars = [];
 let autoRefreshInterval = null;
+let lastInteraction = Date.now();
 
 window.addEventListener('load', () => {
     initializeApp();
@@ -28,6 +32,7 @@ async function initializeApp() {
         await loadEvents();
         startAutoRefresh();
         setupVisibilityListener();
+        requestWakeLock();
     } else {
         showAuthView();
     }
@@ -40,8 +45,9 @@ function showAuthView() {
     document.querySelector('.calendar-grid').style.display = 'none';
     document.getElementById('menuBtn').style.display = 'none';
     document.getElementById('refreshBtn').style.display = 'none';
-    document.getElementById('signoutBtn').style.display = 'none';
+    document.getElementById('agendaBtn').style.display = 'none';
     document.getElementById('loadingOverlay').classList.add('hidden');
+    setAgendaOpen(false);
 }
 
 function showCalendarView() {
@@ -49,7 +55,41 @@ function showCalendarView() {
     document.querySelector('.calendar-grid').style.display = 'flex';
     document.getElementById('menuBtn').style.display = 'flex';
     document.getElementById('refreshBtn').style.display = 'flex';
-    document.getElementById('signoutBtn').style.display = 'flex';
+    document.getElementById('agendaBtn').style.display = 'flex';
+}
+
+function openMenu() {
+    document.getElementById('menuPanel').classList.remove('hidden');
+    document.getElementById('menuBackdrop').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeMenu() {
+    document.getElementById('menuPanel').classList.add('hidden');
+    document.getElementById('menuBackdrop').classList.add('hidden');
+    document.body.style.overflow = '';
+}
+
+function setAgendaOpen(open) {
+    document.getElementById('agendaPanel').classList.toggle('open', open);
+    const agendaBtn = document.getElementById('agendaBtn');
+    agendaBtn.classList.toggle('active', open);
+    agendaBtn.setAttribute('aria-expanded', open);
+}
+
+async function goToToday() {
+    calendar.goToToday();
+    await loadEvents();
+}
+
+async function showPrevious() {
+    calendar.previous();
+    await loadEvents();
+}
+
+async function showNext() {
+    calendar.next();
+    await loadEvents();
 }
 
 function setupEventListeners() {
@@ -57,23 +97,13 @@ function setupEventListeners() {
         api.signIn();
     });
 
-    document.getElementById('signoutBtn').addEventListener('click', async () => {
-        await api.signOut();
-        stopAutoRefresh();
-        showAuthView();
-        calendar.setEvents([]);
-        calendar.render();
-    });
+    document.addEventListener('pointerdown', () => {
+        lastInteraction = Date.now();
+    }, { capture: true, passive: true });
 
-    document.getElementById('prevMonth').addEventListener('click', async () => {
-        calendar.previousMonth();
-        await loadEvents();
-    });
-
-    document.getElementById('nextMonth').addEventListener('click', async () => {
-        calendar.nextMonth();
-        await loadEvents();
-    });
+    document.getElementById('prevRange').addEventListener('click', showPrevious);
+    document.getElementById('nextRange').addEventListener('click', showNext);
+    document.getElementById('rangeTitle').addEventListener('click', goToToday);
 
     document.getElementById('refreshBtn').addEventListener('click', async () => {
         console.log('Manual refresh triggered');
@@ -81,31 +111,15 @@ function setupEventListeners() {
         await loadEvents();
     });
 
-    const menuBtn = document.getElementById('menuBtn');
     const menuPanel = document.getElementById('menuPanel');
-    const closeMenu = document.getElementById('closeMenu');
-    const menuBackdrop = document.getElementById('menuBackdrop');
 
-    function openMenu() {
-        menuPanel.classList.remove('hidden');
-        menuBackdrop.classList.remove('hidden');
-        document.body.style.overflow = 'hidden';
-    }
-
-    function closeMenuFn() {
-        menuPanel.classList.add('hidden');
-        menuBackdrop.classList.add('hidden');
-        document.body.style.overflow = '';
-    }
-
-    menuBtn.addEventListener('click', openMenu);
-    closeMenu.addEventListener('click', closeMenuFn);
-    menuBackdrop.addEventListener('click', closeMenuFn);
+    document.getElementById('menuBtn').addEventListener('click', openMenu);
+    document.getElementById('closeMenu').addEventListener('click', closeMenu);
+    document.getElementById('menuBackdrop').addEventListener('click', closeMenu);
 
     document.getElementById('todayBtn').addEventListener('click', async () => {
-        calendar.goToToday();
-        await loadEvents();
-        closeMenuFn();
+        await goToToday();
+        closeMenu();
     });
 
     // Prevent menu from closing when clicking inside
@@ -119,53 +133,63 @@ function setupEventListeners() {
         await loadEvents();
     });
 
-    // Swipe gesture support for month navigation
-    setupSwipeGestures();
+    const agendaPanel = document.getElementById('agendaPanel');
+    document.getElementById('agendaBtn').addEventListener('click', () => {
+        setAgendaOpen(!agendaPanel.classList.contains('open'));
+    });
+    document.getElementById('closeAgenda').addEventListener('click', () => setAgendaOpen(false));
+
+    const daySheet = document.getElementById('daySheet');
+    document.getElementById('closeDaySheet').addEventListener('click', () => calendar.closeDaySheet());
+    daySheet.addEventListener('click', (e) => {
+        if (e.target === daySheet) {
+            calendar.closeDaySheet();
+        }
+    });
+
+    addSwipeListener(document.getElementById('calendarBody'), showNext, showPrevious);
+    addSwipeListener(agendaPanel, null, () => setAgendaOpen(false));
 }
 
-function setupSwipeGestures() {
-    const calendarBody = document.getElementById('calendarBody');
+function addSwipeListener(element, onSwipeLeft, onSwipeRight) {
     let touchStartX = 0;
     let touchStartY = 0;
-    let touchEndX = 0;
-    let touchEndY = 0;
 
-    calendarBody.addEventListener('touchstart', (e) => {
-        // Don't interfere with event taps
-        if (e.target.closest('.event')) {
-            return;
-        }
+    element.addEventListener('touchstart', (e) => {
         touchStartX = e.changedTouches[0].screenX;
         touchStartY = e.changedTouches[0].screenY;
     }, { passive: true });
 
-    calendarBody.addEventListener('touchend', async (e) => {
-        // Don't interfere with event taps
-        if (e.target.closest('.event')) {
+    element.addEventListener('touchend', (e) => {
+        const deltaX = e.changedTouches[0].screenX - touchStartX;
+        const deltaY = e.changedTouches[0].screenY - touchStartY;
+
+        if (Math.abs(deltaX) <= Math.abs(deltaY) || Math.abs(deltaX) <= 50) {
             return;
         }
-        touchEndX = e.changedTouches[0].screenX;
-        touchEndY = e.changedTouches[0].screenY;
 
-        const deltaX = touchEndX - touchStartX;
-        const deltaY = touchEndY - touchStartY;
-
-        // Check if it's a horizontal swipe (more horizontal than vertical)
-        if (Math.abs(deltaX) > Math.abs(deltaY)) {
-            // Swipe threshold of 50 pixels
-            if (Math.abs(deltaX) > 50) {
-                if (deltaX > 0) {
-                    // Swipe right - previous month
-                    calendar.previousMonth();
-                    await loadEvents();
-                } else {
-                    // Swipe left - next month
-                    calendar.nextMonth();
-                    await loadEvents();
-                }
-            }
+        const handler = deltaX > 0 ? onSwipeRight : onSwipeLeft;
+        if (handler) {
+            handler();
         }
     }, { passive: true });
+}
+
+function loadHiddenCalendars() {
+    try {
+        return new Set(JSON.parse(localStorage.getItem(HIDDEN_CALENDARS_KEY)) || []);
+    } catch (error) {
+        console.error('Failed to read hidden calendars:', error);
+        return new Set();
+    }
+}
+
+function saveHiddenCalendars() {
+    try {
+        localStorage.setItem(HIDDEN_CALENDARS_KEY, JSON.stringify(Array.from(hiddenCalendars)));
+    } catch (error) {
+        console.error('Failed to save hidden calendars:', error);
+    }
 }
 
 async function loadCalendars() {
@@ -173,10 +197,6 @@ async function loadCalendars() {
         const calendars = await api.getCalendars();
         allCalendars = calendars;
         calendar.setCalendars(calendars);
-
-        if (selectedCalendars.size === 0) {
-            calendars.forEach(cal => selectedCalendars.add(cal.id));
-        }
 
         renderCalendarList();
     } catch (error) {
@@ -197,7 +217,7 @@ function renderCalendarList() {
     allCalendars.forEach(cal => {
         const item = document.createElement('div');
         item.className = 'calendar-item';
-        if (selectedCalendars.has(cal.id)) {
+        if (!hiddenCalendars.has(cal.id)) {
             item.classList.add('active');
         }
 
@@ -214,13 +234,14 @@ function renderCalendarList() {
         item.appendChild(name);
 
         item.addEventListener('click', async () => {
-            if (selectedCalendars.has(cal.id)) {
-                selectedCalendars.delete(cal.id);
-                item.classList.remove('active');
-            } else {
-                selectedCalendars.add(cal.id);
+            if (hiddenCalendars.has(cal.id)) {
+                hiddenCalendars.delete(cal.id);
                 item.classList.add('active');
+            } else {
+                hiddenCalendars.add(cal.id);
+                item.classList.remove('active');
             }
+            saveHiddenCalendars();
 
             await loadEvents();
         });
@@ -241,37 +262,34 @@ async function loadEvents(showLoading = true) {
     }
 
     try {
-        document.getElementById('currentMonth').textContent = calendar.getMonthName();
+        document.getElementById('rangeTitle').textContent = calendar.getTitle();
 
-        const firstDay = calendar.getFirstDayOfMonth();
-        const lastDay = calendar.getLastDayOfMonth();
-
-        const startDate = new Date(firstDay);
-        startDate.setDate(startDate.getDate() - 7);
-
-        const endDate = new Date(lastDay);
-        endDate.setDate(endDate.getDate() + 7);
-
-        const startStr = formatDate(startDate);
-        const endStr = formatDate(endDate);
-
-        const calendarIds = Array.from(selectedCalendars);
+        const calendarIds = allCalendars.filter(cal => !hiddenCalendars.has(cal.id)).map(cal => cal.id);
         if (calendarIds.length === 0) {
             calendar.setEvents([]);
+            calendar.setAgendaEvents([]);
             calendar.render();
+            calendar.renderAgenda();
             return;
         }
 
-        const events = await api.getEvents(calendarIds, startStr, endStr);
+        const viewStart = calendar.getRangeStart();
+        const viewEnd = calendar.getRangeEnd();
+        const events = await fetchEvents(calendarIds, viewStart, viewEnd);
 
-        const localEvents = events.map(event => ({
-            ...event,
-            start: new Date(event.start),
-            end: new Date(event.end)
-        }));
+        const agendaStart = new Date();
+        agendaStart.setHours(0, 0, 0, 0);
+        const agendaEnd = new Date(agendaStart);
+        agendaEnd.setDate(agendaEnd.getDate() + CONFIG.AGENDA_DAYS);
 
-        calendar.setEvents(localEvents);
+        const agendaEvents = viewStart <= agendaStart && agendaEnd <= viewEnd
+            ? events
+            : await fetchEvents(calendarIds, agendaStart, agendaEnd);
+
+        calendar.setEvents(events);
+        calendar.setAgendaEvents(agendaEvents);
         calendar.render();
+        calendar.renderAgenda();
     } catch (error) {
         console.error('Error loading events:', error);
 
@@ -290,6 +308,21 @@ async function loadEvents(showLoading = true) {
     }
 }
 
+// Pad a day on each side because the API reads the date strings as UTC midnight.
+async function fetchEvents(calendarIds, start, end) {
+    const paddedStart = new Date(start);
+    paddedStart.setDate(paddedStart.getDate() - 1);
+    const paddedEnd = new Date(end);
+    paddedEnd.setDate(paddedEnd.getDate() + 1);
+
+    const events = await api.getEvents(calendarIds, formatDate(paddedStart), formatDate(paddedEnd));
+    return events.map(event => ({
+        ...event,
+        start: new Date(event.start),
+        end: new Date(event.end)
+    }));
+}
+
 function formatDate(date) {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -301,14 +334,27 @@ function showError(message) {
     console.error(message);
 }
 
-function shouldAdvanceToCurrentMonth() {
-    const today = new Date();
-    const currentMonth = calendar.currentDate.getMonth();
-    const currentYear = calendar.currentDate.getFullYear();
-    const todayMonth = today.getMonth();
-    const todayYear = today.getFullYear();
+function resetIfIdle() {
+    if (Date.now() - lastInteraction < CONFIG.IDLE_RESET) {
+        return;
+    }
 
-    return currentMonth !== todayMonth || currentYear !== todayYear;
+    closeMenu();
+    setAgendaOpen(false);
+    calendar.closeDaySheet();
+    calendar.goToToday();
+}
+
+async function requestWakeLock() {
+    if (!('wakeLock' in navigator) || document.hidden) {
+        return;
+    }
+
+    try {
+        await navigator.wakeLock.request('screen');
+    } catch (error) {
+        console.error('Wake lock request failed:', error);
+    }
 }
 
 function startAutoRefresh() {
@@ -319,11 +365,7 @@ function startAutoRefresh() {
     autoRefreshInterval = setInterval(async () => {
         console.log('Auto-refreshing calendar events...');
         try {
-            if (shouldAdvanceToCurrentMonth()) {
-                console.log('Advancing to current month');
-                calendar.goToToday();
-            }
-
+            resetIfIdle();
             api.clearCache();
             await loadEvents(false);
         } catch (error) {
@@ -349,11 +391,8 @@ function setupVisibilityListener() {
         } else {
             console.log('Page visible - refreshing immediately');
 
-            if (shouldAdvanceToCurrentMonth()) {
-                console.log('Advancing to current month');
-                calendar.goToToday();
-            }
-
+            requestWakeLock();
+            resetIfIdle();
             api.clearCache();
             await loadEvents(false);
         }
@@ -361,14 +400,15 @@ function setupVisibilityListener() {
 }
 
 function updateCurrentTime() {
-    const timeEl = document.getElementById('currentTime');
-    if (timeEl) {
-        const now = new Date();
-        const timeStr = now.toLocaleTimeString('en-US', {
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true
-        });
-        timeEl.textContent = timeStr;
-    }
+    const now = new Date();
+    document.getElementById('currentTime').textContent = now.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+    });
+    document.getElementById('currentDate').textContent = now.toLocaleDateString('en-US', {
+        weekday: 'long',
+        month: 'long',
+        day: 'numeric'
+    });
 }
