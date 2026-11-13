@@ -6,6 +6,7 @@ let hiddenCalendars = loadHiddenCalendars();
 let allCalendars = [];
 let autoRefreshInterval = null;
 let lastInteraction = Date.now();
+let latestEventsRequest = 0;
 
 window.addEventListener('load', () => {
     initializeApp();
@@ -108,7 +109,7 @@ function setupEventListeners() {
     document.getElementById('refreshBtn').addEventListener('click', async () => {
         console.log('Manual refresh triggered');
         api.clearCache();
-        await loadEvents();
+        await loadEvents(false);
     });
 
     const menuPanel = document.getElementById('menuPanel');
@@ -130,7 +131,7 @@ function setupEventListeners() {
     document.getElementById('refreshCalendars').addEventListener('click', async () => {
         api.clearCache();
         await loadCalendars();
-        await loadEvents();
+        await loadEvents(false);
     });
 
     const agendaPanel = document.getElementById('agendaPanel');
@@ -253,6 +254,7 @@ function renderCalendarList() {
 async function loadEvents(showLoading = true) {
     const loadingOverlay = document.getElementById('loadingOverlay');
     const refreshBtn = document.getElementById('refreshBtn');
+    const request = ++latestEventsRequest;
 
     if (showLoading) {
         loadingOverlay.classList.remove('hidden');
@@ -286,6 +288,10 @@ async function loadEvents(showLoading = true) {
             ? events
             : await fetchEvents(calendarIds, agendaStart, agendaEnd);
 
+        if (request !== latestEventsRequest) {
+            return;
+        }
+
         calendar.setEvents(events);
         calendar.setAgendaEvents(agendaEvents);
         calendar.render();
@@ -300,9 +306,8 @@ async function loadEvents(showLoading = true) {
             showError('Failed to load events');
         }
     } finally {
-        if (showLoading) {
+        if (request === latestEventsRequest) {
             loadingOverlay.classList.add('hidden');
-        } else {
             refreshBtn.classList.remove('refreshing');
         }
     }

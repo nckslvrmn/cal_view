@@ -40,7 +40,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 16px;
+    padding: calc(8px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left));
     background: var(--bg-card);
     border-bottom: 1px solid var(--border-color);
     box-shadow: var(--shadow);
@@ -185,6 +185,7 @@ body {
     left: 0;
     width: 320px;
     height: 100vh;
+    padding-top: env(safe-area-inset-top);
     background: var(--bg-card);
     border-right: 1px solid var(--border-color);
     box-shadow: 4px 0 16px rgba(0, 0, 0, 0.5);
@@ -430,7 +431,7 @@ body {
     flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 16px;
+    padding: 16px max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
     overflow: hidden;
     min-height: 0;
 }
@@ -498,7 +499,8 @@ body {
     border-bottom: none;
 }
 
-.calendar-day.past {
+.calendar-day.past,
+.calendar-day.other-month {
     background: rgba(26, 26, 26, 0.8);
 }
 
@@ -515,7 +517,8 @@ body {
     line-height: 1.2;
 }
 
-.calendar-day.past .day-number {
+.calendar-day.past .day-number,
+.calendar-day.other-month .day-number {
     color: var(--text-muted);
 }
 
@@ -881,7 +884,7 @@ body {
 /* Mobile portrait optimizations */
 @media (max-width: 768px) {
     .header {
-        padding: 8px 12px;
+        padding: calc(8px + env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
     }
 
     .menu-panel {

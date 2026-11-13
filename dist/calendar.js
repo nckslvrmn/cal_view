@@ -69,7 +69,14 @@ class CalendarRenderer {
     render() {
         this.calendarBody.innerHTML = '';
 
-        const todayStr = new Date().toLocaleDateString('en-CA');
+        const today = new Date();
+        const todayStr = today.toLocaleDateString('en-CA');
+
+        let focusMonth = today;
+        if (today < this.startDate || today >= this.getRangeEnd()) {
+            focusMonth = new Date(this.startDate);
+            focusMonth.setDate(focusMonth.getDate() + Math.floor(CONFIG.WEEKS_SHOWN * 7 / 2));
+        }
 
         // Store cell dates for multi-day event calculation
         const cellDates = [];
@@ -88,6 +95,10 @@ class CalendarRenderer {
                 cell.classList.add('today');
             } else if (cellDateStr < todayStr) {
                 cell.classList.add('past');
+            }
+
+            if (currentCellDate.getMonth() !== focusMonth.getMonth() || currentCellDate.getFullYear() !== focusMonth.getFullYear()) {
+                cell.classList.add('other-month');
             }
 
             const dayNumberEl = document.createElement('div');
