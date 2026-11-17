@@ -1,6 +1,6 @@
 class CalendarRenderer {
     constructor() {
-        this.startDate = this.weekStart(new Date());
+        this.setMonth(new Date());
         this.events = [];
         this.agendaEvents = [];
         this.cellDates = [];
@@ -26,29 +26,28 @@ class CalendarRenderer {
         return start;
     }
 
+    setMonth(date) {
+        this.month = new Date(date.getFullYear(), date.getMonth(), 1);
+        this.startDate = this.weekStart(this.month);
+    }
+
+    getDaysShown() {
+        const daysInMonth = new Date(this.month.getFullYear(), this.month.getMonth() + 1, 0).getDate();
+        return Math.ceil((this.month.getDay() + daysInMonth) / 7) * 7;
+    }
+
     getRangeStart() {
         return new Date(this.startDate);
     }
 
     getRangeEnd() {
         const end = new Date(this.startDate);
-        end.setDate(end.getDate() + CONFIG.WEEKS_SHOWN * 7);
+        end.setDate(end.getDate() + this.getDaysShown());
         return end;
     }
 
     getTitle() {
-        const start = this.startDate;
-        const last = this.getRangeEnd();
-        last.setDate(last.getDate() - 1);
-
-        if (start.getMonth() === last.getMonth()) {
-            return start.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-        }
-
-        const sameYear = start.getFullYear() === last.getFullYear();
-        const startLabel = start.toLocaleDateString('en-US', sameYear ? { month: 'short' } : { month: 'short', year: 'numeric' });
-        const lastLabel = last.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-        return `${startLabel} – ${lastLabel}`;
+        return this.month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     }
 
     setEvents(events) {
@@ -72,17 +71,11 @@ class CalendarRenderer {
         const today = new Date();
         const todayStr = today.toLocaleDateString('en-CA');
 
-        let focusMonth = today;
-        if (today < this.startDate || today >= this.getRangeEnd()) {
-            focusMonth = new Date(this.startDate);
-            focusMonth.setDate(focusMonth.getDate() + Math.floor(CONFIG.WEEKS_SHOWN * 7 / 2));
-        }
-
         // Store cell dates for multi-day event calculation
         const cellDates = [];
         const cellElements = [];
 
-        for (let i = 0; i < CONFIG.WEEKS_SHOWN * 7; i++) {
+        for (let i = 0; i < this.getDaysShown(); i++) {
             const cell = document.createElement('div');
             cell.className = 'calendar-day';
             cell.dataset.index = i;
@@ -97,7 +90,7 @@ class CalendarRenderer {
                 cell.classList.add('past');
             }
 
-            if (currentCellDate.getMonth() !== focusMonth.getMonth() || currentCellDate.getFullYear() !== focusMonth.getFullYear()) {
+            if (currentCellDate.getMonth() !== this.month.getMonth()) {
                 cell.classList.add('other-month');
             }
 
@@ -638,14 +631,14 @@ class CalendarRenderer {
     }
 
     previous() {
-        this.startDate.setDate(this.startDate.getDate() - CONFIG.WEEKS_SHOWN * 7);
+        this.setMonth(new Date(this.month.getFullYear(), this.month.getMonth() - 1, 1));
     }
 
     next() {
-        this.startDate.setDate(this.startDate.getDate() + CONFIG.WEEKS_SHOWN * 7);
+        this.setMonth(new Date(this.month.getFullYear(), this.month.getMonth() + 1, 1));
     }
 
     goToToday() {
-        this.startDate = this.weekStart(new Date());
+        this.setMonth(new Date());
     }
 }
