@@ -558,7 +558,7 @@ body {
 }
 
 .calendar-day.past .event:not(.event-multi-day),
-.event.ended {
+.calendar-day.past .event.ended {
     opacity: 0.45;
 }
 

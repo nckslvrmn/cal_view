@@ -84,13 +84,14 @@ class CalendarRenderer {
             currentCellDate.setDate(currentCellDate.getDate() + i);
 
             const cellDateStr = currentCellDate.toLocaleDateString('en-CA');
+            const inMonth = currentCellDate.getMonth() === this.month.getMonth();
             if (cellDateStr === todayStr) {
                 cell.classList.add('today');
-            } else if (cellDateStr < todayStr) {
+            } else if (cellDateStr < todayStr && !inMonth) {
                 cell.classList.add('past');
             }
 
-            if (currentCellDate.getMonth() !== this.month.getMonth()) {
+            if (!inMonth) {
                 cell.classList.add('other-month');
             }
 
